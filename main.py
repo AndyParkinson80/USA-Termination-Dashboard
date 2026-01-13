@@ -78,9 +78,6 @@ def load_keys(country):
         "client_id": f"ADP-{country}-client-id",
         "client_secret": f"ADP-{country}-client-secret",
         "country_hierarchy_USA": "country_Hierarchy_USA",
-        "country_hierarchy_CAN": "country_Hierarchy_CAN",
-        "strings_to_exclude": "strings_to_exclude",
-        "cascade_API_id": "cascade_API_id",
         "keyfile": f"{country}_cert_key",
         "certfile": f"{country}_cert_pem",
     }
@@ -91,25 +88,11 @@ def load_keys(country):
         secrets["client_id"],
         secrets["client_secret"],
         secrets["strings_to_exclude"],
-        secrets["country_hierarchy_USA"],
-        secrets["country_hierarchy_CAN"],
-        secrets["cascade_API_id"],
         secrets["keyfile"],
         secrets["certfile"],
     )
 
 def load_ssl(certfile_content, keyfile_content):
-    """
-    Create temporary files for the certificate and keyfile contents.
-    
-    Args:
-        certfile_content (str): The content of the certificate file.
-        keyfile_content (str): The content of the key file.
-    
-    Returns:
-        tuple: Paths to the temporary certificate and key files.
-    """
-    # Create temporary files for certfile and keyfile
     temp_certfile = tempfile.NamedTemporaryFile(delete=False)
     temp_keyfile = tempfile.NamedTemporaryFile(delete=False)
 
@@ -146,10 +129,9 @@ def adp_bearer(client_id,client_secret,certfile,keyfile):
 
     return access_token
 
-def api_count_adp(page_size,url,headers,type):
+def api_count_adp(page_size,url,headers):
 
     api_count_params = {
-            #"$filter": "workers/workerStatus/statusCode/codeValue eq 'Terminated'",
             "count": "true",
         }
     
@@ -160,10 +142,9 @@ def api_count_adp(page_size,url,headers,type):
 
     return api_calls
 
-def api_call(page_size,skip_param,api_url,api_headers,type):
+def api_call(page_size,skip_param,api_url,api_headers):
     
     api_params = {
-    #"$filter": "workers/workerStatus/statusCode/codeValue eq 'Terminated'",
     "$top": page_size,
     "$skip": skip_param
     }
@@ -185,11 +166,11 @@ def GET_workers_adp():
         'Accept':"application/json;masked=false"
         }
     
-    api_calls = api_count_adp(page_size,adp_workers,api_headers,type)
+    api_calls = api_count_adp(page_size,adp_workers,api_headers)
     for i in range(api_calls):
         skip_param = i * page_size
 
-        api_response = api_call(page_size,skip_param,adp_workers,api_headers,type)
+        api_response = api_call(page_size,skip_param,adp_workers,api_headers)
 
         if api_response.status_code == 200:
             json_data = api_response.json()
@@ -209,6 +190,75 @@ def GET_workers_adp():
 
     return adp_terminated
 
+def find_job_title(assignment):
+    job_title_code = assignment.get("jobCode",{}).get("codeValue","")
+    job_title_long = assignment.get("jobCode",{}).get("longName","")
+    job_title_short = assignment.get("jobCode",{}).get("shortName","")
+    if job_title_long:
+        job_title = job_title_long
+    else:
+        job_title = job_title_short
+    return job_title_code,job_title
+
+def find_status(assignment):
+    status = assignment.get("assignmentStatus", {})
+    reason = status.get("reasonCode", {}) or {}
+    if reason:
+        reason_code = reason.get("codeValue", "")
+        reason_word = reason.get("shortName", "")
+    else:
+        reason_code = assignment["assignmentStatus"]["statusCode"]["codeValue"]
+        reason_word = assignment["assignmentStatus"]["statusCode"]["shortName"]
+
+    return reason_code, reason_word
+
+def reports_to(assignment):
+    reports_to_list = assignment.get("reportsTo", {})
+    if reports_to_list:
+        formatted_name = reports_to_list[0].get("reportsToWorkerName", {}).get("formattedName", "")
+    else:
+        formatted_name = ""
+    return formatted_name
+
+def home_department(assignment,person_name):
+    homeOrg = assignment.get("homeOrganizationalUnits",{})
+    if not isinstance(homeOrg, list):
+        homeOrg = []
+    department_index = None
+    for idx, record in enumerate(homeOrg):
+        type_code = record.get("typeCode", {})
+        code_value = type_code.get("codeValue", "")
+        if code_value == "Department":
+            department_index = idx
+            break
+    
+    try:
+        if homeOrg:
+            name_code = homeOrg[department_index].get("nameCode", {})
+            job_code = name_code.get("codeValue","")
+            job_name = name_code.get("shortName") or name_code.get("longName", "")
+        else:
+            job_code = ""
+            job_name = ""
+    except Exception:
+        print (person_name)
+    return job_code,job_name
+
+def length_of_service(termination_date,hire_date):
+    years = termination_date.year - hire_date.year
+    months = termination_date.month - hire_date.month
+
+    if months < 0:
+        years -= 1
+        months += 12
+
+    if termination_date.day < hire_date.day:
+        months -= 1
+        if months < 0:
+            months += 12
+            years -= 1
+    return years,months
+
 def adp_rejig(data):
     adp_reordered = []
     cutoff = datetime(2025, 1, 1)
@@ -220,81 +270,25 @@ def adp_rejig(data):
         for assignment in entry.get("workAssignments", []):
             hire_str = assignment.get("hireDate")
             termination_str = assignment.get("terminationDate")
-            job_title_code = assignment.get("jobCode",{}).get("codeValue","")
-            job_title_long = assignment.get("jobCode",{}).get("longName","")
-            job_title_short = assignment.get("jobCode",{}).get("shortName","")
-            if job_title_long:
-                job_title = job_title_long
-            else:
-                job_title = job_title_short
-
-            status = assignment.get("assignmentStatus", {})
-            reason = status.get("reasonCode", {}) or {}
-            if reason:
-                reason_code = reason.get("codeValue", "")
-                reason_word = reason.get("shortName", "")
-            else:
-                reason_code = assignment["assignmentStatus"]["statusCode"]["codeValue"]
-                reason_word = assignment["assignmentStatus"]["statusCode"]["shortName"]
+            termination_date = datetime.strptime(termination_str, "%Y-%m-%d")
+            hire_date = datetime.strptime(hire_str, "%Y-%m-%d")
             
-            reports_to_list = assignment.get("reportsTo", {})
-            if reports_to_list:
-                formatted_name = reports_to_list[0].get("reportsToWorkerName", {}).get("formattedName", "")
-            else:
-                formatted_name = ""
-
-            homeOrg = assignment.get("homeOrganizationalUnits",{})
-            if not isinstance(homeOrg, list):
-                homeOrg = []
-            department_index = None
-            for idx, record in enumerate(homeOrg):
-                type_code = record.get("typeCode", {})
-                code_value = type_code.get("codeValue", "")
-                if code_value == "Department":
-                    department_index = idx
-                    break
-            
-            try:
-                if homeOrg:
-                    name_code = homeOrg[department_index].get("nameCode", {})
-                    job_code = name_code.get("codeValue","")
-                    job_name = name_code.get("shortName") or name_code.get("longName", "")
-                else:
-                    job_code = ""
-                    job_name = ""
-            except Exception:
-                print (person_name)
-
             if not termination_str:
                 continue
-
-            try:
-                termination_date = datetime.strptime(termination_str, "%Y-%m-%d")
-                hire_date = datetime.strptime(hire_str, "%Y-%m-%d")
-            except Exception:
-                continue  
-
             if termination_date < cutoff:
                 continue
 
-            years = termination_date.year - hire_date.year
-            months = termination_date.month - hire_date.month
-
-            if months < 0:
-                years -= 1
-                months += 12
-
-            if termination_date.day < hire_date.day:
-                months -= 1
-                if months < 0:
-                    months += 12
-                    years -= 1
+            job_title_code,job_title = find_job_title(assignment)
+            reason_code, reason_word = find_status(assignment)
+            formatted_name = reports_to(assignment)
+            dept_code,dept_name = home_department(assignment,person_name)
+            years, months = length_of_service(termination_date,hire_date)
 
             adp_reordered.append({
                 "CO_CODE": "KZO",
                 "NAME": person_name,
                 "ASSOCIATE_ID": workerID,
-                "HOME_DEPARTMENT": f"{job_code} - {job_name}",
+                "HOME_DEPARTMENT": f"{dept_code} - {dept_name}",
                 "JOB_TITLE": f"{job_title_code} - {job_title}",
                 "HIRE_DATE": hire_str,
                 "TERMINATION_DATE": termination_str,
@@ -304,10 +298,8 @@ def adp_rejig(data):
             })
 
     # sort by termination date ascending
-    adp_reordered = sorted(
-        adp_reordered,
-        key=lambda r: r["TERMINATION_DATE"]
-    )
+    adp_reordered = sorted(adp_reordered,key=lambda r: r["TERMINATION_DATE"])
+
     if data_export:
         export_data("002 - ADP (Data Out - rejig).json", adp_reordered)
 
@@ -335,7 +327,6 @@ def upload_to_bigquery(data, table_id):
         job.result()  # Wait for the job to complete
         print(f"Data loaded into {table_id}")
 
-    #delete_table_data(project, dataset_id, table_id)
     load_data(data, project_Id, dataset_id, table_id)
 
 def deduplicate_terminations(project_id, dataset, table):
@@ -376,7 +367,7 @@ if __name__ == "__main__":
 
         global access_token,certfile,keyfile,strings_to_exclude
 
-        client_id, client_secret, strings_to_exclude, country_hierarchy_USA, country_hierarchy_CAN, cascade_API_id, keyfile, certfile = load_keys(c)
+        client_id, client_secret, strings_to_exclude, keyfile, certfile = load_keys(c)
         certfile, keyfile = load_ssl(certfile, keyfile)
         access_token = adp_bearer(client_id,client_secret,certfile,keyfile)
 
