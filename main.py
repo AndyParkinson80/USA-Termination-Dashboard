@@ -77,7 +77,7 @@ def load_keys(country):
     secret_ids = {
         "client_id": f"ADP-{country}-client-id",
         "client_secret": f"ADP-{country}-client-secret",
-        "country_hierarchy_USA": "country_Hierarchy_USA",
+        "strings_to_exclude": "strings_to_exclude",
         "keyfile": f"{country}_cert_key",
         "certfile": f"{country}_cert_pem",
     }
