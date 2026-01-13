@@ -19,8 +19,7 @@ from google.auth.exceptions import DefaultCredentialsError
 from google.oauth2 import service_account
 from google.cloud import secretmanager, bigquery
 
-testing = False
-data_export = True
+data_export = False
 
 current_folder = Path(__file__).resolve().parent
 data_store = current_folder / "Data"
@@ -77,7 +76,6 @@ def load_keys(country):
     secret_ids = {
         "client_id": f"ADP-{country}-client-id",
         "client_secret": f"ADP-{country}-client-secret",
-        "strings_to_exclude": "strings_to_exclude",
         "keyfile": f"{country}_cert_key",
         "certfile": f"{country}_cert_pem",
     }
@@ -87,7 +85,6 @@ def load_keys(country):
     return (
         secrets["client_id"],
         secrets["client_secret"],
-        secrets["strings_to_exclude"],
         secrets["keyfile"],
         secrets["certfile"],
     )
@@ -178,7 +175,6 @@ def GET_workers_adp():
         
             filtered_data = [
                 worker for worker in json_data 
-                if worker.get('workerID', {}).get('idValue') not in strings_to_exclude
             ]
                 
             adp_terminated.extend(filtered_data)
@@ -270,11 +266,13 @@ def adp_rejig(data):
         for assignment in entry.get("workAssignments", []):
             hire_str = assignment.get("hireDate")
             termination_str = assignment.get("terminationDate")
-            termination_date = datetime.strptime(termination_str, "%Y-%m-%d")
-            hire_date = datetime.strptime(hire_str, "%Y-%m-%d")
             
             if not termination_str:
                 continue
+
+            termination_date = datetime.strptime(termination_str, "%Y-%m-%d")
+            hire_date = datetime.strptime(hire_str, "%Y-%m-%d")
+            
             if termination_date < cutoff:
                 continue
 
@@ -365,9 +363,9 @@ if __name__ == "__main__":
     
     def main_section(c):
 
-        global access_token,certfile,keyfile,strings_to_exclude
+        global access_token,certfile,keyfile
 
-        client_id, client_secret, strings_to_exclude, keyfile, certfile = load_keys(c)
+        client_id, client_secret, keyfile, certfile = load_keys(c)
         certfile, keyfile = load_ssl(certfile, keyfile)
         access_token = adp_bearer(client_id,client_secret,certfile,keyfile)
 
